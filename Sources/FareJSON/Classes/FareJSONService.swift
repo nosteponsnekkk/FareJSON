@@ -2,7 +2,7 @@
 //  FareJSONService.swift
 //
 //  Created by varbodysomeview on 12.03.2025.
-//
+//  Updated: 2025-03-12
 //
 
 import Foundation
@@ -10,49 +10,44 @@ import SwiftyFare
 import SotoS3
 
 /// A singleton service that manages downloading, caching, and decoding of JSON files.
-/// It conforms to the `FareJSONClient` protocol.
+/// Conforming to the `FareJSONClient` protocol, this service abstracts the process of fetching
+/// JSON from remote S3 storage, caching it locally, and decoding it into application-specific models.
+///
+/// The service leverages the SwiftyFare SDK for network operations and uses the local file system
+/// to persist downloaded JSON data.
 public final class FareJSONService: FareJSONClient {
     
     // MARK: - Private Properties
     
-    /// Default instance of SwiftyFare used for network operations.
+    /// The default instance of SwiftyFare used for making network requests.
     private let swiftyFare = SwiftyFare.default
     
-    /// Default file manager used to handle file operations.
+    /// The shared file manager used to perform file system operations.
     private let fileManager = FileManager.default
     
-    /// Maximum allowed buffer size when downloading JSON data (1 MB).
+    /// Maximum allowed buffer size (in bytes) when downloading JSON data (set to 1 MB).
     private let bufferLimit: Int = 1 * 1024 * 1024
     
-    /// Cached directory URL for storing downloaded JSON files.
+    /// The documents directory URL for storing downloaded JSON files.
+    /// This directory is lazily initialized and created if it does not already exist.
     private lazy var documentsDirectory: URL = {
         guard let docsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("FareJSON") else {
             fatalError("No documents directory found.")
         }
-        // Create the directory if it does not exist.
+        // Attempt to create the directory if it doesn't exist.
         try? fileManager.createDirectory(at: docsURL, withIntermediateDirectories: true, attributes: nil)
         return docsURL
     }()
     
-    /// URL for a metadata file that persists the revision tags.
-    private lazy var metadataFileURL: URL = {
-        return documentsDirectory.appendingPathComponent("FareJSONMetadata.json")
-    }()
-    
-    /// Dictionary mapping file names to their revision tags.
-    /// This is persisted to disk between sessions.
-    private var metadata: [String: String] = [:]
-    
-    /// A dictionary for caching JSON file entries using the file name as key.
+    /// A cache mapping file names to their corresponding cached JSON entries.
+    /// This is used to avoid repeated downloads and to provide fast access to JSON data.
     private var cachedJSONs: [String: CachedJSONEntry] = [:]
     
     // MARK: - Initialization
     
     /// Private initializer to enforce singleton usage.
-    private init() {
-        loadMetadata()
-    }
+    private init() { }
     
     /// Shared singleton instance conforming to `FareJSONClient`.
     public static let shared: FareJSONClient = FareJSONService()
@@ -62,59 +57,40 @@ public final class FareJSONService: FareJSONClient {
 
 private extension FareJSONService {
     
-    /// Returns the file URL within the cached documents directory for a given file name.
+    /// Constructs a file URL within the cached documents directory for a given file name.
     ///
     /// - Parameter fileName: The name of the file.
-    /// - Returns: A `URL` pointing to the expected location of the file.
+    /// - Returns: A `URL` representing the expected local storage location of the file.
     func documentsURL(for fileName: String) -> URL {
         return documentsDirectory.appendingPathComponent(fileName)
     }
     
-    /// Downloads a JSON file from remote storage, writes it locally, and returns the local file URL.
+    /// Downloads a JSON file from remote storage, writes it to a local file, and returns the file URL.
     ///
-    /// - Parameter key: The key of the JSON file to download.
+    /// This method performs the following steps:
+    /// 1. Retrieves the JSON object using the SwiftyFare client.
+    /// 2. Determines a local file URL based on the last path component of the provided key.
+    /// 3. Collects the response data up to the defined buffer limit.
+    /// 4. Writes the data to the local file system.
+    ///
+    /// - Parameter key: The key (or path) of the JSON file to download.
     /// - Returns: A `URL` pointing to the locally saved JSON file.
-    /// - Throws: An error if the download, buffering, or file write fails.
+    /// - Throws: An error if the network download, data buffering, or file writing fails.
     func loadJSON(key: String) async throws -> URL {
-        // Fetch the JSON object from remote storage.
+        // Retrieve the JSON object from the remote storage.
         let response = try await swiftyFare.getObject(withKey: key)
         
-        // Determine the local file URL for saving.
+        // Determine the local file URL based on the file name extracted from the key.
         let localFileURL = documentsURL(for: (key as NSString).lastPathComponent)
         
-        // Collect the response data up to the defined buffer limit.
+        // Collect the response data up to the specified buffer limit.
         let buffer = try await response.collect(upTo: bufferLimit)
         let data = Data(buffer: buffer)
         
-        // Write the downloaded data to the local file.
+        // Write the collected data to the local file.
         try data.write(to: localFileURL)
         
         return localFileURL
-    }
-    
-    // MARK: - Metadata Persistence
-    
-    /// Loads the metadata dictionary from the metadata file, if it exists.
-    func loadMetadata() {
-        if fileManager.fileExists(atPath: metadataFileURL.path) {
-            do {
-                let data = try Data(contentsOf: metadataFileURL)
-                let dict = try JSONDecoder().decode([String: String].self, from: data)
-                metadata = dict
-            } catch {
-                print("Failed to load metadata: \(error)")
-            }
-        }
-    }
-    
-    /// Saves the metadata dictionary to the metadata file.
-    func saveMetadata() {
-        do {
-            let data = try JSONEncoder().encode(metadata)
-            try data.write(to: metadataFileURL)
-        } catch {
-            print("Failed to save metadata: \(error)")
-        }
     }
 }
 
@@ -122,97 +98,89 @@ private extension FareJSONService {
 
 public extension FareJSONService {
     
-    /// Downloads and caches all JSON files for a given `FareJSON` type.
+    /// Downloads and caches all JSON files corresponding to a given `FareJSON` type.
     ///
-    /// This method lists all files in the specified folder, matches them with the provided enum cases,
-    /// checks the remote revision tag against the locally stored tag, downloads updated JSON files if needed,
-    /// and caches them locally.
+    /// This method:
+    /// 1. Determines the remote folder path from the provided `FareJSON` type.
+    /// 2. Retrieves a list of JSON file objects available in that folder.
+    /// 3. Matches the retrieved file names with the expected enum cases defined in `FareJSON`.
+    /// 4. Downloads each JSON file and caches its local file URL.
     ///
-    /// - Parameter json: The type conforming to `FareJSON` that represents the JSON files.
-    /// - Throws: An error if listing, downloading, or file operations fail.
+    /// - Parameter json: The type conforming to `FareJSON` that represents the expected JSON files.
+    /// - Throws: An error if listing remote files, downloading, or file operations fail.
     func prepare<Item: FareJSON>(_ json: Item.Type) async throws {
-        // Determine the folder path from the FareJSON type.
+        // Obtain the remote folder path associated with the FareJSON type.
         let folder = json.folderPath
         
-        // Retrieve the list of file objects available in the remote storage.
+        // Retrieve the list of file objects from remote storage within the folder.
         let objects = try await swiftyFare.listFiles(inDirectory: folder)
         
-        // Map each enum case to its file name for easy lookup.
+        // Build a lookup dictionary mapping file names to their corresponding FareJSON enum cases.
         var itemsByFileName = [String: Item]()
         for item in Item.allCases {
             itemsByFileName[item.fileName] = item
         }
         
-        // Process each object retrieved from remote storage.
+        // Iterate through each retrieved object from remote storage.
         for object in objects {
-            // Check if the object's key matches one of the expected file names.
+            // Extract the file name from the object's key and validate its presence in the expected items.
             guard let fileName = (object.key as NSString?)?.lastPathComponent,
                   let key = object.key,
                   let item = itemsByFileName[fileName] else { continue }
             
-            let localFileURL = documentsURL(for: fileName)
-            let fileExists = fileManager.fileExists(atPath: localFileURL.path)
+            // Download the JSON file and get its local URL.
+            let localURL = try await loadJSON(key: key)
+            // Create a cache entry linking the FareJSON enum case with the downloaded file's URL.
+            let entry = CachedJSONEntry(item: item, fileURL: localURL)
             
-            // Retrieve the remote revision tag.
-            let remoteTag = try await swiftyFare.getRevision(withKey: key)
-            
-            if fileExists, let localTag = metadata[fileName], localTag == remoteTag {
-                // Cached file is up-to-date.
-                cachedJSONs[fileName] = CachedJSONEntry(item: item, fileURL: localFileURL, revisionTag: localTag)
-            } else {
-                // Either no local file exists or the revision tag has changed – download new JSON.
-                let newLocalURL = try await loadJSON(key: key)
-                // Update the metadata with the new revision tag.
-                metadata[fileName] = remoteTag
-                cachedJSONs[fileName] = CachedJSONEntry(item: item, fileURL: newLocalURL, revisionTag: remoteTag)
-            }
+            // Store the cache entry using the file name as the key.
+            cachedJSONs[fileName] = entry
         }
-        // Persist updated metadata.
-        saveMetadata()
     }
     
-    /// Retrieves and decodes a cached JSON file into a specified type.
+    /// Retrieves and decodes a cached JSON file into an instance of the specified type.
     ///
-    /// - Parameter json: The `FareJSON` enum case representing the cached JSON file.
+    /// This method checks if the JSON file corresponding to the provided `FareJSON` enum case
+    /// has been cached. If so, it reads the local file, decodes its contents into the desired type,
+    /// and returns the decoded object.
+    ///
+    /// - Parameters:
+    ///   - json: The `FareJSON` enum case representing the cached JSON file.
     /// - Returns: A decoded object of type `T`.
-    /// - Throws: `FareJSONError.noCachedJSON` if the file is not found in the cache, or
-    ///           decoding errors if the file contents cannot be parsed into the expected type.
+    /// - Throws: `FareJSONError.noCachedJSON` if the JSON file is not found in the cache,
+    ///           or a decoding error if the file's contents cannot be parsed into the expected type.
     func getJSON<Item: FareJSON, T: Decodable>(json: Item) throws -> T {
-        // Retrieve the cached entry for the specified JSON file.
+        // Look up the cached JSON entry using the file name from the FareJSON enum case.
         guard let entry = cachedJSONs[json.fileName] else {
             throw FareJSONError.noCachedJSON
         }
-        // Load data from the cached file.
+        // Read the data from the locally cached file.
         let data = try Data(contentsOf: entry.fileURL)
-        // Decode and return the JSON data into the expected type.
+        // Decode and return the data as the specified type.
         return try JSONDecoder().decode(T.self, from: data)
     }
 }
 
 // MARK: - Private Cached JSON Entry
 
-/// A structure representing a cached JSON file entry.
+/// Private extension containing the structure used for caching JSON files.
 private extension FareJSONService {
+    /// Represents a cached JSON file entry.
     struct CachedJSONEntry {
-        /// The FareJSON enum case associated with the JSON file.
+        /// The FareJSON enum case associated with this JSON file.
         let item: any FareJSON
         
         /// The local file URL where the JSON file is stored.
         var fileURL: URL
         
-        /// The revision tag associated with the cached JSON.
-        let revisionTag: String
-        
-        /// Initializes a new cached JSON entry.
+        /// Creates a new cached JSON entry.
         ///
         /// - Parameters:
-        ///   - item: The FareJSON enum case.
-        ///   - fileURL: The local file URL where the JSON is stored.
-        ///   - revisionTag: The revision tag for the JSON file.
-        init(item: any FareJSON, fileURL: URL, revisionTag: String) {
+        ///   - item: The FareJSON enum case representing the file.
+        ///   - fileURL: The local file URL where the JSON data is saved.
+        init(item: any FareJSON, fileURL: URL) {
             self.item = item
             self.fileURL = fileURL
-            self.revisionTag = revisionTag
         }
     }
 }
