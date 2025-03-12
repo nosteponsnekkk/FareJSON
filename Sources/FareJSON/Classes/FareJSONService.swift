@@ -83,7 +83,7 @@ private extension FareJSONService {
         let localFileURL = documentsURL(for: (key as NSString).lastPathComponent)
         
         // Collect the response data up to the defined buffer limit.
-        let buffer = try await response.collect(upTo: bufferLimit)
+        let buffer = try await response.body.collect(upTo: bufferLimit)
         let data = Data(buffer: buffer)
         
         // Write the downloaded data to the local file.
