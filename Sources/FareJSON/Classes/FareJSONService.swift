@@ -62,15 +62,15 @@ private extension FareJSONService {
     
     /// Downloads a JSON file from the remote storage, writes it locally, and returns the local file URL.
     ///
-    /// - Parameter fileName: The name of the JSON file to download.
+    /// - Parameter key: The key of the JSON file to download.
     /// - Returns: A `URL` pointing to the locally saved JSON file.
     /// - Throws: An error if the download, buffering, or file write fails.
-    func loadJSON(fileName: String) async throws -> URL {
+    func loadJSON(key: String) async throws -> URL {
         // Fetch the JSON object from remote storage.
-        let response = try await swiftyFare.getObject(withKey: fileName)
+        let response = try await swiftyFare.getObject(withKey: key)
         
         // Determine the local file URL for saving.
-        let localFileURL = documentsURL(for: fileName)
+        let localFileURL = documentsURL(for: key)
         
         // Collect the response data up to the defined buffer limit.
         let buffer = try await response.collect(upTo: bufferLimit)
@@ -110,11 +110,12 @@ public extension FareJSONService {
         // Process each object retrieved from remote storage.
         for object in objects {
             // Check if the object's key matches one of the expected file names.
-            guard let fileName = object.key,
+            guard let fileName = (object.key as NSString?)?.lastPathComponent,
+                  let key = object.key,
                   let item = itemsByFileName[fileName] else { continue }
             
             // Download and store the JSON locally.
-            let localURL = try await loadJSON(fileName: fileName)
+            let localURL = try await loadJSON(key: key)
             let entry = CachedJSONEntry(item: item, fileURL: localURL)
             
             // Cache the entry for future retrieval.
