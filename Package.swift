@@ -17,7 +17,6 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/nosteponsnekkk/SwiftyFare.git", branch: "main"),
-        .package(url: "https://github.com/apple/swift-syntax.git", from: "509.0.0")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -28,10 +27,7 @@ let package = Package(
                 .product(
                     name: "SwiftyFare",
                     package: "SwiftyFare"
-                ),
-                .product(name: "SwiftSyntax", package: "swift-syntax"),
-                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
-                .product(name: "SwiftDiagnostics", package: "swift-syntax")
+                )
             ]
         ),
         .testTarget(
