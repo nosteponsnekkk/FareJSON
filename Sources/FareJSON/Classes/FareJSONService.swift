@@ -70,7 +70,7 @@ private extension FareJSONService {
         let response = try await swiftyFare.getObject(withKey: key)
         
         // Determine the local file URL for saving.
-        let localFileURL = documentsURL(for: key)
+        let localFileURL = documentsURL(for: (key as NSString).lastPathComponent)
         
         // Collect the response data up to the defined buffer limit.
         let buffer = try await response.collect(upTo: bufferLimit)
