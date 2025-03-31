@@ -186,6 +186,14 @@ public extension FareJSONService {
         // Decode and return the JSON data into the expected type.
         return try JSONDecoder().decode(T.self, from: data)
     }
+    func getData<Item: FareJSON>(json: Item) throws -> Data {
+        // Retrieve the cached entry for the specified JSON file.
+        guard let entry = cachedJSONs[json.fileName] else {
+            throw FareJSONError.noCachedJSON
+        }
+        // Load data from the cached file.
+        return try Data(contentsOf: entry.fileURL)
+    }
 }
 
 // MARK: - Private Cached JSON Entry

@@ -22,4 +22,6 @@ public protocol FareJSONClient: AnyObject {
     /// - Returns: A decoded object of the expected type.
     /// - Throws: An error if the JSON file is not cached or if decoding fails.
     func getJSON<Item: FareJSON, T: Decodable>(json: Item) throws -> T
+    
+    func getData<Item: FareJSON>(json: Item) throws -> Data 
 }
