@@ -130,51 +130,57 @@ public extension FareJSONService {
     ///
     /// - Parameter json: The type conforming to `FareJSON` that represents the JSON files.
     /// - Throws: An error if listing, downloading, or file operations fail.
-    func prepare<Item: FareJSON>(_ json: Item.Type, isV1: Bool) async throws {
-        // Determine the folder path from the FareJSON type.
+    /// Checks each known JSON file’s ETag via HeadObject, and only downloads those
+    /// whose ETag has changed (or that don’t exist locally).
+    func prepare<Item: FareJSON>(_ json: Item.Type) async throws {
         let folder = json.folderPath
         
-        // Retrieve the list of file objects available in the remote storage.
-        var objects: [S3.Object] = []
-        if isV1 {
-            objects = try await swiftyFare.listFilesV1(inDirectory: folder)
-        } else {
-            objects = try await swiftyFare.listFiles(inDirectory: folder)
-        }
+        // 1. Build a lookup from fileName → enum case
+        let itemsByFileName = Dictionary(uniqueKeysWithValues:
+            Item.allCases.map { ($0.fileName, $0) }
+        )
         
-        // Map each enum case to its file name for easy lookup.
-        var itemsByFileName = [String: Item]()
-        for item in Item.allCases {
-            itemsByFileName[item.fileName] = item
-        }
-        
-        // Process each object retrieved from remote storage.
-        for object in objects {
-            // Check if the object's key matches one of the expected file names.
-            guard let fileName = (object.key as NSString?)?.lastPathComponent,
-                  let key = object.key,
-                  let eTag = object.eTag,
-                  let item = itemsByFileName[fileName] else { continue }
+        // 2. For each known file name, do a HEAD to get its ETag
+        for (fileName, item) in itemsByFileName {
+            let key = "\(folder)/\(fileName)"              // e.g. "data/airport.json"
             
-            let localFileURL = documentsURL(for: fileName)
-            let fileExists = fileManager.fileExists(atPath: localFileURL.path)
-       
+            // HEAD object instead of listing
+            let headResponse = try await swiftyFare.headObject(withKey: key)
+            guard let remoteETag = headResponse.eTag else {
+                // no ETag? skip
+                continue
+            }
             
-            if fileExists, let localTag = metadata[fileName], localTag == eTag {
-                // Cached file is up-to-date.
-                cachedJSONs[fileName] = CachedJSONEntry(item: item, fileURL: localFileURL, revisionTag: localTag)
+            let localURL = documentsURL(for: fileName)
+            let alreadyExists = fileManager.fileExists(atPath: localURL.path)
+            let needsDownload = !alreadyExists
+                             || metadata[fileName] != remoteETag
+            
+            if needsDownload {
+                // download full JSON
+                let downloadedURL = try await loadJSON(key: key)
+                
+                // update our cache and metadata
+                metadata[fileName] = remoteETag
+                cachedJSONs[fileName] = CachedJSONEntry(
+                    item: item,
+                    fileURL: downloadedURL,
+                    revisionTag: remoteETag
+                )
             } else {
-                // Either no local file exists or the revision tag has changed – download new JSON.
-                let newLocalURL = try await loadJSON(key: key)
-                // Update the metadata with the new revision tag.
-                metadata[fileName] = eTag
-                cachedJSONs[fileName] = CachedJSONEntry(item: item, fileURL: newLocalURL, revisionTag: eTag)
+                // already up-to-date: just cache the existing file
+                cachedJSONs[fileName] = CachedJSONEntry(
+                    item: item,
+                    fileURL: localURL,
+                    revisionTag: remoteETag
+                )
             }
         }
-        // Persist updated metadata.
+        
+        // 3. Persist updated ETags
         saveMetadata()
     }
-    
+
     /// Retrieves and decodes a cached JSON file into a specified type.
     ///
     /// - Parameter json: The `FareJSON` enum case representing the cached JSON file.
