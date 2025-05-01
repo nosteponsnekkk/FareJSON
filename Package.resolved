@@ -1,5 +1,5 @@
 {
-  "originHash" : "b0d3a42497ece49e2e5f04dd030d55a6cb64381867a5c7a39da457d7784fad38",
+  "originHash" : "fb49a4b73a94ce1c909a730a13f6559fcdfcbc8051ffcdb4bb5fc7f0a8a0bf2a",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -205,7 +205,7 @@
       "location" : "https://github.com/nosteponsnekkk/SwiftyFare.git",
       "state" : {
         "branch" : "main",
-        "revision" : "ebf79e99a8b7d2d3442f84386cea9476793a4a6f"
+        "revision" : "a3e2add4c59a6e83233195adb14b06042215951a"
       }
     }
   ],

@@ -14,7 +14,7 @@ public protocol FareJSONClient: AnyObject {
     ///
     /// - Parameter json: The type conforming to `FareJSON` that represents the JSON files.
     /// - Throws: An error if the preparation (download or caching) fails.
-    func prepare<Item: FareJSON>(_ json: Item.Type) async throws
+    func prepare<Item: FareJSON>(_ json: Item.Type, isV1: Bool) async throws
     
     /// Retrieves and decodes a cached JSON file.
     ///

@@ -130,12 +130,17 @@ public extension FareJSONService {
     ///
     /// - Parameter json: The type conforming to `FareJSON` that represents the JSON files.
     /// - Throws: An error if listing, downloading, or file operations fail.
-    func prepare<Item: FareJSON>(_ json: Item.Type) async throws {
+    func prepare<Item: FareJSON>(_ json: Item.Type, isV1: Bool) async throws {
         // Determine the folder path from the FareJSON type.
         let folder = json.folderPath
         
         // Retrieve the list of file objects available in the remote storage.
-        let objects = try await swiftyFare.listFiles(inDirectory: folder)
+        var objects: [S3.Object] = []
+        if isV1 {
+            objects = try await swiftyFare.listFilesV1(inDirectory: folder)
+        } else {
+            objects = try await swiftyFare.listFiles(inDirectory: folder)
+        }
         
         // Map each enum case to its file name for easy lookup.
         var itemsByFileName = [String: Item]()
